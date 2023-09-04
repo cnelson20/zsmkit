@@ -1,3 +1,9 @@
+# Fork of ZSMKit
+
+Original project by mooinglemur
+This fork is to enable me to use ZSMKit with my cc65 C projects with the default config file
+If using ASM only, I recommend you use the original ZSMKit
+
 # ZSMKit
 Advanced music and sound effects engine for the Commander X16
 
