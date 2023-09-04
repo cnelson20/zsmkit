@@ -2,7 +2,7 @@ DEFINES =
 
 # Comment this to save space if you don't plan to stream ZSMs from disk without
 # loading them in their entirety
-DEFINES += -D ZSMKIT_ENABLE_STREAMING
+# DEFINES += -D ZSMKIT_ENABLE_STREAMING
 
 UC = $(shell echo '$1' | tr '[:lower:]' '[:upper:]')
 

@@ -64,7 +64,7 @@ NUM_PRIORITIES = 4
 FILENAME_MAX_LENGTH = 64
 RINGBUFFER_SIZE = 1024
 
-.segment "ZSMKITLIB"
+.segment "CODE"
 zsmkit_bank: ; the RAM bank dedicated to ZSMKit to use for state
 	.res 1
 saved_bank: ; used for preserving the bank in main loop calls
@@ -77,245 +77,6 @@ tmp1 := buff
 tmp2 := buff+4
 tmp3 := buff+8
 
-.segment "ZSMKITBANK"
-_ZSM_BANK_START := *
-
-; To support the option of streaming ZSM data from SD card,
-; ZSMKit allocates 1k for each of the four priorities.
-; These ring buffers are fed by calling `zsm_fill_buffers`
-; in the program's main loop. In the event of an underrun,
-; the engine will halt the song and mark it as not playable.
-;
-; The ring buffers for the four priorities are located at:
-; 0:$A000 1:$A400 2:$A800 3:$AC00
-;
-; offset = (priority * 1024)
-zsm_ringbuffers:        .res NUM_PRIORITIES*RINGBUFFER_SIZE
-
-; offset = priority*256
-opm_shadow:             .res NUM_PRIORITIES*256
-
-; offset = (priority * 64) + (register)
-vera_psg_shadow:        .res NUM_PRIORITIES*64
-
-; offset = (priority * 8) + (voice)
-opm_atten_shadow:       .res NUM_PRIORITIES*8
-
-; offset = (priority * 8) + (voice)
-opm_key_shadow:			.res NUM_PRIORITIES*8
-
-; offset = (priority * 16) + (voice)
-vera_psg_atten_shadow:  .res NUM_PRIORITIES*16
-
-pcm_ctrl_shadow:        .res NUM_PRIORITIES
-pcm_rate_shadow:        .res NUM_PRIORITIES
-pcm_atten_shadow:       .res NUM_PRIORITIES
-
-; These two arrays are set via properties on the ZSM
-; based on which voices are used.  If the priority slot
-; is not active, these are zeroed.
-
-; offset = (priority * 8) + (voice)
-opm_voice_mask:         .res NUM_PRIORITIES*8
-
-; offset = (priority * 16) + (voice)
-vera_psg_voice_mask:    .res NUM_PRIORITIES*16
-
-; Is the song playing? Nonzero is truth.
-; offset = (priority)
-prio_active:            .res NUM_PRIORITIES
-
-; Did the player encounter a fault of some sort?
-; This is set zero whenever that happens
-; It is set nonzero when a file is loaded and
-; is ready
-prio_playable:          .res NUM_PRIORITIES
-
-; Callback is called whenever the song ends or loops
-callback_addr_l:        .res NUM_PRIORITIES
-callback_addr_h:        .res NUM_PRIORITIES
-callback_bank:          .res NUM_PRIORITIES
-callback_enabled:       .res NUM_PRIORITIES
-
-.ifdef ZSMKIT_ENABLE_STREAMING
-; Is the song fully in memory or played through a 1k ring buffer?
-; zero = traditional memory storage, nonzero = ring buffer
-; offset = (priority)
-streaming_mode:         .res NUM_PRIORITIES
-
-; The ring buffer positions (absolute addresses)
-; offset = (priority)
-ringbuffer_start_l:     .res NUM_PRIORITIES
-ringbuffer_start_h:     .res NUM_PRIORITIES
-
-; offset = (priority)
-; end is non-inclusive
-ringbuffer_end_l:       .res NUM_PRIORITIES
-ringbuffer_end_h:       .res NUM_PRIORITIES
-
-; 24 bit address within the file
-; where the loop point exists
-; offset = (priority)
-streaming_loop_point_l: .res NUM_PRIORITIES
-streaming_loop_point_m: .res NUM_PRIORITIES
-streaming_loop_point_h: .res NUM_PRIORITIES
-
-; 24 bit offset of what has been read
-; from the streamed ZSM
-streaming_pos_l:        .res NUM_PRIORITIES
-streaming_pos_m:        .res NUM_PRIORITIES
-streaming_pos_h:        .res NUM_PRIORITIES
-
-; 24 bit offset of where it expects to find
-; the end of data marker.
-; beyond this point could be PCM data
-; and we don't want to slurp that in when streaming
-streaming_eod_l:        .res NUM_PRIORITIES
-streaming_eod_m:        .res NUM_PRIORITIES
-streaming_eod_h:        .res NUM_PRIORITIES
-
-; When `zsm_fill_buffers` encounters EOI, this flag is set.
-; Since opening a file can be expensive, we save that for
-; the next tick. That call then reopens the file, seeks
-; to the loop point, and then returns. The call on the tick
-; subsequent to that is the first to start pumping data
-; into the ring buffer again.
-streaming_reopen:       .res NUM_PRIORITIES
-
-; streaming filename OPEN string, must be <=64 bytes
-; we need to keep this in the engine because looping
-; will typically require the file to be reopened.
-; offset = (priority*64)
-streaming_filename:     .res NUM_PRIORITIES*FILENAME_MAX_LENGTH
-; offset = (priority)
-streaming_filename_len: .res NUM_PRIORITIES
-
-; The logical file number and the secondary address are both the same
-; and are assigned by the user
-streaming_lfn_sa:       .res NUM_PRIORITIES
-
-; Device, almost always 8
-streaming_dev:          .res NUM_PRIORITIES
-
-; Goes true when streaming is finished
-streaming_finished:     .res NUM_PRIORITIES
-.endif
-
-; For non-streaming mode, the bank and offset of the beginning of
-; the song, loop point, and of the current pointer
-; offset = (priority)
-zsm_start_bank:         .res NUM_PRIORITIES
-zsm_start_l:            .res NUM_PRIORITIES
-zsm_start_h:            .res NUM_PRIORITIES
-
-zsm_loop_bank:          .res NUM_PRIORITIES
-zsm_loop_l:             .res NUM_PRIORITIES
-zsm_loop_h:             .res NUM_PRIORITIES 
-
-zsm_ptr_bank:           .res NUM_PRIORITIES
-zsm_ptr_l:              .res NUM_PRIORITIES
-zsm_ptr_h:              .res NUM_PRIORITIES
-
-; For both streaming and non-streaming mode
-loop_enable:            .res NUM_PRIORITIES
-
-loop_number_l:          .res NUM_PRIORITIES
-loop_number_h:          .res NUM_PRIORITIES
-
-; Hz (from file)
-tick_rate_l:            .res NUM_PRIORITIES
-tick_rate_h:            .res NUM_PRIORITIES
-
-; speed (Hz/60) - delays to subtract per tick
-speed_f:                .res NUM_PRIORITIES
-speed_l:                .res NUM_PRIORITIES
-speed_h:                .res NUM_PRIORITIES
-
-; delay (playback state)
-delay_f:                .res NUM_PRIORITIES
-delay_l:                .res NUM_PRIORITIES
-delay_h:                .res NUM_PRIORITIES
-
-; if exists, points to the PCM instrument table in RAM
-pcm_table_exists:       .res NUM_PRIORITIES
-pcm_table_bank:         .res NUM_PRIORITIES
-pcm_table_l:            .res NUM_PRIORITIES
-pcm_table_h:            .res NUM_PRIORITIES
-
-pcm_inst_max:           .res NUM_PRIORITIES
-
-pcm_data_bank:          .res NUM_PRIORITIES
-pcm_data_l:             .res NUM_PRIORITIES
-pcm_data_h:             .res NUM_PRIORITIES
-
-; The prio that currently has a PCM event going
-; $80 means ZCM is/was playing
-; ZCM always takes over the PCM channel
-pcm_prio:               .res 1
-
-; Set while playing.  Higher priorities can take over
-; PCM by emptying the FIFO and then starting their own
-; sound
-pcm_busy:               .res 1
-
-; The pointer to the PCM data to read next
-pcm_cur_bank:           .res 1
-pcm_cur_l:              .res 1
-pcm_cur_h:              .res 1
-
-; Bytes left for reading data to pump into the FIFO
-pcm_remain_l:           .res 1
-pcm_remain_m:           .res 1
-pcm_remain_h:           .res 1
-
-; Loop point
-pcm_loop_bank:          .res 1
-pcm_loop_l:             .res 1
-pcm_loop_h:             .res 1
-pcm_islooped:           .res 1
-
-pcm_loop_rem_l:         .res 1
-pcm_loop_rem_m:         .res 1
-pcm_loop_rem_h:         .res 1
-
-zcm_mem_bank:           .res NUM_ZCM_SLOTS
-zcm_mem_l:              .res NUM_ZCM_SLOTS
-zcm_mem_h:              .res NUM_ZCM_SLOTS
-
-; These arrays contain $FF if the voice is unused or will contain
-; the priority (0-3) of the module that is allowed to use the voice.
-; Other active modules will only feed their shadow instead.
-;
-; Forced inhibit of a voice will set this priority to $FE.
-; This is useful when manipulating a voice directly in user code.
-;
-; Generally the value is set to the highest module
-; priority (slot) which uses the voice
-opm_priority:            .res 8
-vera_psg_priority:       .res 16
-
-; restore shadow at beginning of next tick
-; for opm, this means releasing the note on this channel
-; after setting the fastest release time possible
-; before copying the shadow in
-opm_restore_shadow:      .res 8
-vera_psg_restore_shadow: .res 16
-
-; the flag to indicate that we need to re-evaluate the priorities
-; since it's likely a song is no longer playing
-recheck_priorities:      .res 1
-
-; chip type (from X16 audio library)
-ym_chip_type:            .res 1
-
-; interrupt rate (default 60)
-int_rate:                .res 1
-int_rate_frac:           .res 1
-
-_ZSM_BANK_END := *
-
-
-.segment "ZSMKITLIB"
 ;..................
 ; zsm_init_engine :
 ;============================================================================
@@ -3871,3 +3632,241 @@ pcmrate_slow:
 	.byte $80,$82,$83,$85,$87,$88,$8A,$8B,$8D,$8F,$90,$92,$93,$95,$96,$98
 	.byte $9A,$9B,$9D,$9E,$A0,$A2,$A3,$A5,$A6,$A8,$AA,$AB,$AD,$AE,$B0,$B1
 	.byte $B3,$B5,$B6,$B8,$BA,$BC,$BE,$BF,$C1,$C2,$C4,$C6,$C7,$C9,$CA,$CC
+
+.segment "BSS"
+.org $A000
+_ZSM_BANK_START := $A000
+
+; To support the option of streaming ZSM data from SD card,
+; ZSMKit allocates 1k for each of the four priorities.
+; These ring buffers are fed by calling `zsm_fill_buffers`
+; in the program's main loop. In the event of an underrun,
+; the engine will halt the song and mark it as not playable.
+;
+; The ring buffers for the four priorities are located at:
+; 0:$A000 1:$A400 2:$A800 3:$AC00
+;
+; offset = (priority * 1024)
+zsm_ringbuffers:        .res NUM_PRIORITIES*RINGBUFFER_SIZE
+
+; offset = priority*256
+opm_shadow:             .res NUM_PRIORITIES*256
+
+; offset = (priority * 64) + (register)
+vera_psg_shadow:        .res NUM_PRIORITIES*64
+
+; offset = (priority * 8) + (voice)
+opm_atten_shadow:       .res NUM_PRIORITIES*8
+
+; offset = (priority * 8) + (voice)
+opm_key_shadow:			.res NUM_PRIORITIES*8
+
+; offset = (priority * 16) + (voice)
+vera_psg_atten_shadow:  .res NUM_PRIORITIES*16
+
+pcm_ctrl_shadow:        .res NUM_PRIORITIES
+pcm_rate_shadow:        .res NUM_PRIORITIES
+pcm_atten_shadow:       .res NUM_PRIORITIES
+
+; These two arrays are set via properties on the ZSM
+; based on which voices are used.  If the priority slot
+; is not active, these are zeroed.
+
+; offset = (priority * 8) + (voice)
+opm_voice_mask:         .res NUM_PRIORITIES*8
+
+; offset = (priority * 16) + (voice)
+vera_psg_voice_mask:    .res NUM_PRIORITIES*16
+
+; Is the song playing? Nonzero is truth.
+; offset = (priority)
+prio_active:            .res NUM_PRIORITIES
+
+; Did the player encounter a fault of some sort?
+; This is set zero whenever that happens
+; It is set nonzero when a file is loaded and
+; is ready
+prio_playable:          .res NUM_PRIORITIES
+
+; Callback is called whenever the song ends or loops
+callback_addr_l:        .res NUM_PRIORITIES
+callback_addr_h:        .res NUM_PRIORITIES
+callback_bank:          .res NUM_PRIORITIES
+callback_enabled:       .res NUM_PRIORITIES
+
+.ifdef ZSMKIT_ENABLE_STREAMING
+; Is the song fully in memory or played through a 1k ring buffer?
+; zero = traditional memory storage, nonzero = ring buffer
+; offset = (priority)
+streaming_mode:         .res NUM_PRIORITIES
+
+; The ring buffer positions (absolute addresses)
+; offset = (priority)
+ringbuffer_start_l:     .res NUM_PRIORITIES
+ringbuffer_start_h:     .res NUM_PRIORITIES
+
+; offset = (priority)
+; end is non-inclusive
+ringbuffer_end_l:       .res NUM_PRIORITIES
+ringbuffer_end_h:       .res NUM_PRIORITIES
+
+; 24 bit address within the file
+; where the loop point exists
+; offset = (priority)
+streaming_loop_point_l: .res NUM_PRIORITIES
+streaming_loop_point_m: .res NUM_PRIORITIES
+streaming_loop_point_h: .res NUM_PRIORITIES
+
+; 24 bit offset of what has been read
+; from the streamed ZSM
+streaming_pos_l:        .res NUM_PRIORITIES
+streaming_pos_m:        .res NUM_PRIORITIES
+streaming_pos_h:        .res NUM_PRIORITIES
+
+; 24 bit offset of where it expects to find
+; the end of data marker.
+; beyond this point could be PCM data
+; and we don't want to slurp that in when streaming
+streaming_eod_l:        .res NUM_PRIORITIES
+streaming_eod_m:        .res NUM_PRIORITIES
+streaming_eod_h:        .res NUM_PRIORITIES
+
+; When `zsm_fill_buffers` encounters EOI, this flag is set.
+; Since opening a file can be expensive, we save that for
+; the next tick. That call then reopens the file, seeks
+; to the loop point, and then returns. The call on the tick
+; subsequent to that is the first to start pumping data
+; into the ring buffer again.
+streaming_reopen:       .res NUM_PRIORITIES
+
+; streaming filename OPEN string, must be <=64 bytes
+; we need to keep this in the engine because looping
+; will typically require the file to be reopened.
+; offset = (priority*64)
+streaming_filename:     .res NUM_PRIORITIES*FILENAME_MAX_LENGTH
+; offset = (priority)
+streaming_filename_len: .res NUM_PRIORITIES
+
+; The logical file number and the secondary address are both the same
+; and are assigned by the user
+streaming_lfn_sa:       .res NUM_PRIORITIES
+
+; Device, almost always 8
+streaming_dev:          .res NUM_PRIORITIES
+
+; Goes true when streaming is finished
+streaming_finished:     .res NUM_PRIORITIES
+.endif
+
+; For non-streaming mode, the bank and offset of the beginning of
+; the song, loop point, and of the current pointer
+; offset = (priority)
+zsm_start_bank:         .res NUM_PRIORITIES
+zsm_start_l:            .res NUM_PRIORITIES
+zsm_start_h:            .res NUM_PRIORITIES
+
+zsm_loop_bank:          .res NUM_PRIORITIES
+zsm_loop_l:             .res NUM_PRIORITIES
+zsm_loop_h:             .res NUM_PRIORITIES 
+
+zsm_ptr_bank:           .res NUM_PRIORITIES
+zsm_ptr_l:              .res NUM_PRIORITIES
+zsm_ptr_h:              .res NUM_PRIORITIES
+
+; For both streaming and non-streaming mode
+loop_enable:            .res NUM_PRIORITIES
+
+loop_number_l:          .res NUM_PRIORITIES
+loop_number_h:          .res NUM_PRIORITIES
+
+; Hz (from file)
+tick_rate_l:            .res NUM_PRIORITIES
+tick_rate_h:            .res NUM_PRIORITIES
+
+; speed (Hz/60) - delays to subtract per tick
+speed_f:                .res NUM_PRIORITIES
+speed_l:                .res NUM_PRIORITIES
+speed_h:                .res NUM_PRIORITIES
+
+; delay (playback state)
+delay_f:                .res NUM_PRIORITIES
+delay_l:                .res NUM_PRIORITIES
+delay_h:                .res NUM_PRIORITIES
+
+; if exists, points to the PCM instrument table in RAM
+pcm_table_exists:       .res NUM_PRIORITIES
+pcm_table_bank:         .res NUM_PRIORITIES
+pcm_table_l:            .res NUM_PRIORITIES
+pcm_table_h:            .res NUM_PRIORITIES
+
+pcm_inst_max:           .res NUM_PRIORITIES
+
+pcm_data_bank:          .res NUM_PRIORITIES
+pcm_data_l:             .res NUM_PRIORITIES
+pcm_data_h:             .res NUM_PRIORITIES
+
+; The prio that currently has a PCM event going
+; $80 means ZCM is/was playing
+; ZCM always takes over the PCM channel
+pcm_prio:               .res 1
+
+; Set while playing.  Higher priorities can take over
+; PCM by emptying the FIFO and then starting their own
+; sound
+pcm_busy:               .res 1
+
+; The pointer to the PCM data to read next
+pcm_cur_bank:           .res 1
+pcm_cur_l:              .res 1
+pcm_cur_h:              .res 1
+
+; Bytes left for reading data to pump into the FIFO
+pcm_remain_l:           .res 1
+pcm_remain_m:           .res 1
+pcm_remain_h:           .res 1
+
+; Loop point
+pcm_loop_bank:          .res 1
+pcm_loop_l:             .res 1
+pcm_loop_h:             .res 1
+pcm_islooped:           .res 1
+
+pcm_loop_rem_l:         .res 1
+pcm_loop_rem_m:         .res 1
+pcm_loop_rem_h:         .res 1
+
+zcm_mem_bank:           .res NUM_ZCM_SLOTS
+zcm_mem_l:              .res NUM_ZCM_SLOTS
+zcm_mem_h:              .res NUM_ZCM_SLOTS
+
+; These arrays contain $FF if the voice is unused or will contain
+; the priority (0-3) of the module that is allowed to use the voice.
+; Other active modules will only feed their shadow instead.
+;
+; Forced inhibit of a voice will set this priority to $FE.
+; This is useful when manipulating a voice directly in user code.
+;
+; Generally the value is set to the highest module
+; priority (slot) which uses the voice
+opm_priority:            .res 8
+vera_psg_priority:       .res 16
+
+; restore shadow at beginning of next tick
+; for opm, this means releasing the note on this channel
+; after setting the fastest release time possible
+; before copying the shadow in
+opm_restore_shadow:      .res 8
+vera_psg_restore_shadow: .res 16
+
+; the flag to indicate that we need to re-evaluate the priorities
+; since it's likely a song is no longer playing
+recheck_priorities:      .res 1
+
+; chip type (from X16 audio library)
+ym_chip_type:            .res 1
+
+; interrupt rate (default 60)
+int_rate:                .res 1
+int_rate_frac:           .res 1
+
+_ZSM_BANK_END := *
